@@ -78,7 +78,12 @@ int veekay::run(const veekay::ApplicationInfo& app_info) {
 	}
 
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+	glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+
+#if defined(__APPLE__)
+glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_TRUE);
+glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
+#endif
 
 	window = glfwCreateWindow(window_default_width, window_default_height,
 	                          window_title, nullptr, nullptr);
@@ -87,9 +92,11 @@ int veekay::run(const veekay::ApplicationInfo& app_info) {
 		return 1;
 	}
 
-	veekay::app.window_width = window_default_width;
-	veekay::app.window_height = window_default_height;
-
+	int framebuffer_width = 0, framebuffer_height = 0;
+	glfwGetFramebufferSize(window, &framebuffer_width, &framebuffer_height);
+	veekay::app.window_width = static_cast<uint32_t>(framebuffer_width);
+	veekay::app.window_height = static_cast<uint32_t>(framebuffer_height);
+ 
 	{ // NOTE: Initialize Vulkan: grab device and create swapchain
 		vkb::InstanceBuilder instance_builder;
 
@@ -157,7 +164,7 @@ int veekay::run(const veekay::ApplicationInfo& app_info) {
 
 		auto swapchain_result = swapchain_builder.set_desired_format(surface_format)
 		                                         .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
-		                                         .set_desired_extent(window_default_width, window_default_height)
+		                                         .set_desired_extent(veekay::app.window_width, veekay::app.window_height)
 		                                         .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
 		                                         .build();
 
@@ -258,8 +265,8 @@ int veekay::run(const veekay::ApplicationInfo& app_info) {
 				.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
 				.renderPass = imgui_render_pass,
 				.attachmentCount = 1,
-				.width = window_default_width,
-				.height = window_default_height,
+				.width = veekay::app.window_width,
+				.height = veekay::app.window_height,
 				.layers = 1,
 			};
 
@@ -349,7 +356,7 @@ int veekay::run(const veekay::ApplicationInfo& app_info) {
 			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 			.imageType = VK_IMAGE_TYPE_2D,
 			.format = vk_image_depth_format,
-			.extent = {window_default_width, window_default_height, 1},
+			.extent = {veekay::app.window_width, veekay::app.window_height, 1},
 			.mipLevels = 1,
 			.arrayLayers = 1,
 			.samples = VK_SAMPLE_COUNT_1_BIT,
@@ -513,8 +520,8 @@ int veekay::run(const veekay::ApplicationInfo& app_info) {
 			.attachmentCount = 2,
 			.pAttachments = attachments,
 
-			.width = window_default_width,
-			.height = window_default_height,
+			.width = veekay::app.window_width,
+			.height = veekay::app.window_height,
 			.layers = 1,
 		};
 
@@ -632,7 +639,7 @@ int veekay::run(const veekay::ApplicationInfo& app_info) {
 					.renderPass = imgui_render_pass,
 					.framebuffer = imgui_framebuffers[swapchain_image_index],
 					.renderArea = {
-						.extent = {window_default_width, window_default_height},
+						.extent = {veekay::app.window_width, veekay::app.window_height},
 					},
 				};
 

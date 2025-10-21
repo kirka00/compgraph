@@ -13,10 +13,9 @@
 
 namespace
 {
-
-	constexpr float camera_fov = 70.0f;
-	constexpr float camera_near_plane = 0.01f;
-	constexpr float camera_far_plane = 100.0f;
+	constexpr float camera_fov = 70.0f;		   // Угол обзора камеры в градусах
+	constexpr float camera_near_plane = 0.01f; // Ближняя плоскость отсечения
+	constexpr float camera_far_plane = 100.0f; // Дальняя плоскость отсечения
 
 	struct Matrix
 	{
@@ -33,11 +32,12 @@ namespace
 		Vector position;
 	};
 
+	// Данные, которые мы передаем в шейдеры для каждого объекта
 	struct ShaderConstants
 	{
-		Matrix projection;
-		Matrix transform;
-		Vector color;
+		Matrix projection; // Матрица проекции (камера)
+		Matrix transform;  // Матрица трансформации (положение, вращение объекта)
+		Vector color;	   // Цвет объекта
 	};
 
 	struct VulkanBuffer
@@ -48,24 +48,27 @@ namespace
 
 	struct SceneObject
 	{
-		VulkanBuffer vertex_buffer;
-		VulkanBuffer index_buffer;
-		uint32_t index_count;
+		VulkanBuffer vertex_buffer; // Буфер с вершинами
+		VulkanBuffer index_buffer;	// Буфер с индексами
+		uint32_t index_count;		// Количество индексов для отрисовки
 
-		Vector position;
-		Vector color;
-		float rotation;
+		Vector position; // Позиция в мире
+		Vector color;	 // Цвет
+		float rotation;	 // Угол поворота (в радианах)
 	};
 
-	VkShaderModule vertex_shader_module;
-	VkShaderModule fragment_shader_module;
-	VkPipelineLayout pipeline_layout;
-	VkPipeline pipeline;
+	// Глобальные объекты Vulkan
+	VkShaderModule vertex_shader_module;   // Скомпилированный вершинный шейдер
+	VkShaderModule fragment_shader_module; // Скомпилированный фрагментный шейдер
+	VkPipelineLayout pipeline_layout;	   // Описание ресурсов, используемых конвейером (в нашем случае - push constants)
+	VkPipeline pipeline;				   // Графический конвейер
 
+	// Объекты на нашей сцене
 	SceneObject cube;
 	SceneObject pyramid;
 	SceneObject sphere;
 
+	// Создает единичную матрицу
 	Matrix identity()
 	{
 		Matrix result{};
@@ -76,6 +79,7 @@ namespace
 		return result;
 	}
 
+	// Создает матрицу перспективной проекции
 	Matrix projection(float fov, float aspect_ratio, float near, float far)
 	{
 		Matrix result{};
@@ -89,6 +93,7 @@ namespace
 		return result;
 	}
 
+	// Создает матрицу переноса (смещения)
 	Matrix translation(Vector vector)
 	{
 		Matrix result = identity();
@@ -98,6 +103,7 @@ namespace
 		return result;
 	}
 
+	// Создает матрицу вращения вокруг заданной оси на заданный угол
 	Matrix rotation(Vector axis, float angle)
 	{
 		Matrix result{};
@@ -121,6 +127,7 @@ namespace
 		return result;
 	}
 
+	// Перемножает две матрицы
 	Matrix multiply(const Matrix &a, const Matrix &b)
 	{
 		Matrix result{};
@@ -137,18 +144,24 @@ namespace
 		return result;
 	}
 
+	// Загружает скомпилированный SPIR-V шейдер из файла
 	VkShaderModule loadShaderModule(const char *path)
 	{
+		// Открываем файл в бинарном режиме и перемещаем курсор в конец
 		std::ifstream file(path, std::ios::binary | std::ios::ate);
 		if (!file.is_open())
 		{
 			return nullptr;
 		}
+		// Получаем размер файла
 		size_t size = file.tellg();
+		// Создаем буфер нужного размера (размер в байтах / 4 байта на uint32_t)
 		std::vector<uint32_t> buffer(size / sizeof(uint32_t));
+		// Возвращаем курсор в начало и читаем файл
 		file.seekg(0);
 		file.read(reinterpret_cast<char *>(buffer.data()), size);
 		file.close();
+		// Создаем VkShaderModule из прочитанного кода
 		VkShaderModuleCreateInfo info{
 			.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
 			.codeSize = size,
@@ -159,22 +172,30 @@ namespace
 		return result;
 	}
 
+	// Создает буфер на GPU и копирует в него данные с CPU
 	VulkanBuffer createBuffer(size_t size, void *data, VkBufferUsageFlags usage)
 	{
 		VkDevice &device = veekay::app.vk_device;
 		VkPhysicalDevice &physical_device = veekay::app.vk_physical_device;
 		VulkanBuffer result{};
+
+		// 1. Создаем объект буфера
 		VkBufferCreateInfo bufferInfo{
 			.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 			.size = size,
-			.usage = usage,
+			.usage = usage, // Указываем, как буфер будет использоваться (вершинный, индексный и т.д.)
 			.sharingMode = VK_SHARING_MODE_EXCLUSIVE,
 		};
 		vkCreateBuffer(device, &bufferInfo, nullptr, &result.buffer);
+
+		// 2. Выделяем память для буфера
 		VkMemoryRequirements memRequirements;
 		vkGetBufferMemoryRequirements(device, result.buffer, &memRequirements);
+
 		VkPhysicalDeviceMemoryProperties memProperties;
 		vkGetPhysicalDeviceMemoryProperties(physical_device, &memProperties);
+
+		// Ищем подходящий тип памяти: HOST_VISIBLE (видна CPU) и HOST_COHERENT (не требует ручной синхронизации)
 		const VkMemoryPropertyFlags flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 		uint32_t memoryTypeIndex = UINT_MAX;
 		for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++)
@@ -185,20 +206,27 @@ namespace
 				break;
 			}
 		}
+
 		VkMemoryAllocateInfo allocInfo{
 			.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
 			.allocationSize = memRequirements.size,
 			.memoryTypeIndex = memoryTypeIndex,
 		};
 		vkAllocateMemory(device, &allocInfo, nullptr, &result.memory);
+
+		// 3. Связываем буфер с выделенной памятью
 		vkBindBufferMemory(device, result.buffer, result.memory, 0);
+
+		// 4. Копируем данные с CPU на GPU
 		void *mapped_data;
-		vkMapMemory(device, result.memory, 0, size, 0, &mapped_data);
-		memcpy(mapped_data, data, size);
-		vkUnmapMemory(device, result.memory);
+		vkMapMemory(device, result.memory, 0, size, 0, &mapped_data); // Отображаем память GPU в адресное пространство CPU
+		memcpy(mapped_data, data, size);							  // Копируем данные
+		vkUnmapMemory(device, result.memory);						  // Снимаем отображение
+
 		return result;
 	}
 
+	// Уничтожает буфер и освобождает его память
 	void destroyBuffer(const VulkanBuffer &buffer)
 	{
 		if (buffer.buffer != VK_NULL_HANDLE)
@@ -211,30 +239,37 @@ namespace
 		}
 	}
 
+	// Вызывается один раз при старте приложения
 	void initialize()
 	{
 		VkDevice &device = veekay::app.vk_device;
 
-		{ // Build graphics pipeline
+		// Создание графического конвейера (Pipeline)
+		// Конвейер определяет все стадии рендеринга: вершинный шейдер, растеризация, фрагментный шейдер, тест глубины и т.д.
+		{
+			// Загружаем наши шейдеры
 			vertex_shader_module = loadShaderModule("./shaders/shader.vert.spv");
 			fragment_shader_module = loadShaderModule("./shaders/shader.frag.spv");
 
+			// Описываем стадии шейдеров (вершинный и фрагментный)
 			VkPipelineShaderStageCreateInfo stage_infos[2] = {};
 			stage_infos[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 			stage_infos[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
 			stage_infos[0].module = vertex_shader_module;
-			stage_infos[0].pName = "main";
+			stage_infos[0].pName = "main"; // Точка входа в шейдере
 			stage_infos[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 			stage_infos[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
 			stage_infos[1].module = fragment_shader_module;
 			stage_infos[1].pName = "main";
 
+			// Описываем, как данные вершин подаются в вершинный шейдер
 			VkVertexInputBindingDescription buffer_binding{
-				.binding = 0,
-				.stride = sizeof(Vertex),
-				.inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
+				.binding = 0,							  // Биндинг 0
+				.stride = sizeof(Vertex),				  // Расстояние между вершинами в байтах
+				.inputRate = VK_VERTEX_INPUT_RATE_VERTEX, // Данные для каждой вершины
 			};
 			VkVertexInputAttributeDescription attributes[]{
+				// Атрибут 0 (position): 3 float'а, смещение 0
 				{0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex, position)},
 			};
 			VkPipelineVertexInputStateCreateInfo input_state_info{
@@ -244,10 +279,14 @@ namespace
 				.vertexAttributeDescriptionCount = 1,
 				.pVertexAttributeDescriptions = attributes,
 			};
+
+			// Указываем, что мы рисуем треугольники
 			VkPipelineInputAssemblyStateCreateInfo assembly_state_info{
 				.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
 				.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
 			};
+
+			// Настройки растеризатора: заполняем полигоны, отсекаем задние грани
 			VkPipelineRasterizationStateCreateInfo raster_info{
 				.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
 				.polygonMode = VK_POLYGON_MODE_FILL,
@@ -255,10 +294,14 @@ namespace
 				.frontFace = VK_FRONT_FACE_CLOCKWISE,
 				.lineWidth = 1.0f,
 			};
+
+			// Мультисэмплинг выключен
 			VkPipelineMultisampleStateCreateInfo sample_info{
 				.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
 				.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
 			};
+
+			// Настраиваем область вывода (viewport) и обрезки (scissor)
 			VkViewport viewport{
 				.width = (float)veekay::app.window_width,
 				.height = (float)veekay::app.window_height,
@@ -272,20 +315,26 @@ namespace
 				.scissorCount = 1,
 				.pScissors = &scissor,
 			};
+
+			// Включаем тест глубины
 			VkPipelineDepthStencilStateCreateInfo depth_info{
 				.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
 				.depthTestEnable = VK_TRUE,
 				.depthWriteEnable = VK_TRUE,
 				.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
 			};
+
+			// Настройки смешивания цветов (выключено)
 			VkPipelineColorBlendAttachmentState attachment_info{
-				.colorWriteMask = 0xF,
+				.colorWriteMask = 0xF, // Разрешаем запись во все каналы (RGBA)
 			};
 			VkPipelineColorBlendStateCreateInfo blend_info{
 				.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
 				.attachmentCount = 1,
 				.pAttachments = &attachment_info,
 			};
+
+			// Описываем Push Constants - небольшой объем данных, который можно быстро передать в шейдеры
 			VkPushConstantRange push_constants{
 				.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 				.size = sizeof(ShaderConstants),
@@ -296,6 +345,8 @@ namespace
 				.pPushConstantRanges = &push_constants,
 			};
 			vkCreatePipelineLayout(device, &layout_info, nullptr, &pipeline_layout);
+
+			// Собираем все настройки вместе и создаем конвейер
 			VkGraphicsPipelineCreateInfo info{
 				.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
 				.stageCount = 2,
@@ -308,26 +359,33 @@ namespace
 				.pDepthStencilState = &depth_info,
 				.pColorBlendState = &blend_info,
 				.layout = pipeline_layout,
-				.renderPass = veekay::app.vk_render_pass,
+				.renderPass = veekay::app.vk_render_pass, // Используем render pass из движка
 			};
 			vkCreateGraphicsPipelines(device, nullptr, 1, &info, nullptr, &pipeline);
 		}
 
-		// Create Cube
+		// Создание объектов сцены
+		//  Для каждого объекта мы определяем его геометрию (вершины и индексы) и загружаем на GPU.
+
+		// Создаем куб
 		{
+			// Вершины куба
 			Vertex vertices[] = {
 				{{-0.5f, -0.5f, 0.5f}}, {{0.5f, -0.5f, 0.5f}}, {{0.5f, 0.5f, 0.5f}}, {{-0.5f, 0.5f, 0.5f}}, {{-0.5f, -0.5f, -0.5f}}, {{0.5f, -0.5f, -0.5f}}, {{0.5f, 0.5f, -0.5f}}, {{-0.5f, 0.5f, -0.5f}}};
+			// Индексы, описывающие треугольники
 			uint32_t indices[] = {
 				0, 1, 2, 2, 3, 0, 1, 5, 6, 6, 2, 1, 7, 6, 5, 5, 4, 7,
 				4, 0, 3, 3, 7, 4, 4, 5, 1, 1, 0, 4, 3, 2, 6, 6, 7, 3};
+			// Создаем буферы на GPU
 			cube.vertex_buffer = createBuffer(sizeof(vertices), vertices, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 			cube.index_buffer = createBuffer(sizeof(indices), indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 			cube.index_count = sizeof(indices) / sizeof(uint32_t);
+			// Задаем начальные параметры
 			cube.position = {-2.0f, 0.0f, 7.0f};
-			cube.color = {1.0f, 0.0f, 0.0f};
+			cube.color = {1.0f, 0.0f, 0.0f}; // Красный
 		}
 
-		// Create Pyramid
+		// Создаем пирамиду
 		{
 			Vertex vertices[] = {
 				{{0.0f, 0.5f, 0.0f}}, {{-0.5f, -0.5f, 0.5f}}, {{0.5f, -0.5f, 0.5f}}, {{0.5f, -0.5f, -0.5f}}, {{-0.5f, -0.5f, -0.5f}}};
@@ -337,16 +395,17 @@ namespace
 			pyramid.index_buffer = createBuffer(sizeof(indices), indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 			pyramid.index_count = sizeof(indices) / sizeof(uint32_t);
 			pyramid.position = {0.0f, 0.0f, 7.0f};
-			pyramid.color = {0.0f, 1.0f, 0.0f};
+			pyramid.color = {0.0f, 1.0f, 0.0f}; // Зеленый
 		}
 
-		// Create Sphere
+		// Создаем сферу (геометрия генерируется программно)
 		{
 			std::vector<Vertex> vertices;
 			std::vector<uint32_t> indices;
 			const int sectors = 36;
 			const int stacks = 18;
 			const float radius = 0.5f;
+			// Генерируем вершины
 			for (int i = 0; i <= stacks; ++i)
 			{
 				float stackAngle = std::numbers::pi_v<float> / 2 - i * std::numbers::pi_v<float> / stacks;
@@ -360,6 +419,7 @@ namespace
 					vertices.push_back({{x, y, z}});
 				}
 			}
+			// Генерируем индексы
 			for (int i = 0; i < stacks; ++i)
 			{
 				for (int j = 0; j < sectors; ++j)
@@ -378,13 +438,15 @@ namespace
 			sphere.index_buffer = createBuffer(indices.size() * sizeof(uint32_t), indices.data(), VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 			sphere.index_count = indices.size();
 			sphere.position = {2.0f, 0.0f, 7.0f};
-			sphere.color = {0.0f, 0.0f, 1.0f};
+			sphere.color = {0.0f, 0.0f, 1.0f}; // Синий
 		}
 	}
 
+	// Вызывается один раз при завершении работы приложения
 	void shutdown()
 	{
 		VkDevice &device = veekay::app.vk_device;
+		// Уничтожаем все созданные ресурсы в обратном порядке
 		destroyBuffer(cube.index_buffer);
 		destroyBuffer(cube.vertex_buffer);
 		destroyBuffer(pyramid.index_buffer);
@@ -397,25 +459,58 @@ namespace
 		vkDestroyShaderModule(device, vertex_shader_module, nullptr);
 	}
 
+	// Вызывается каждый кадр для обновления логики
 	void update(double time)
 	{
+		// Заставляем объекты вращаться со временем
 		cube.rotation = fmodf(float(time) * 0.5f, 2.0f * std::numbers::pi_v<float>);
 		pyramid.rotation = fmodf(float(time) * 0.5f, 2.0f * std::numbers::pi_v<float>);
 		sphere.rotation = fmodf(float(time) * 0.5f, 2.0f * std::numbers::pi_v<float>);
+
+		// Создаем окно для управления параметрами сцены
+		ImGui::Begin("Scene Controls");
+
+		if (ImGui::CollapsingHeader("Cube"))
+		{
+			ImGui::DragFloat3("Position##Cube", &cube.position.x, 0.1f);
+			ImGui::ColorEdit3("Color##Cube", &cube.color.x);
+			ImGui::SliderFloat("Rotation##Cube", &cube.rotation, 0.0f, 2.0f * std::numbers::pi_v<float>);
+		}
+
+		if (ImGui::CollapsingHeader("Pyramid"))
+		{
+			ImGui::DragFloat3("Position##Pyramid", &pyramid.position.x, 0.1f);
+			ImGui::ColorEdit3("Color##Pyramid", &pyramid.color.x);
+			ImGui::SliderFloat("Rotation##Pyramid", &pyramid.rotation, 0.0f, 2.0f * std::numbers::pi_v<float>);
+		}
+
+		if (ImGui::CollapsingHeader("Sphere"))
+		{
+			ImGui::DragFloat3("Position##Sphere", &sphere.position.x, 0.1f);
+			ImGui::ColorEdit3("Color##Sphere", &sphere.color.x);
+			ImGui::SliderFloat("Rotation##Sphere", &sphere.rotation, 0.0f, 2.0f * std::numbers::pi_v<float>);
+		}
+
+		ImGui::End();
 	}
 
+	// Вызывается каждый кадр для отрисовки сцены
 	void render(VkCommandBuffer cmd, VkFramebuffer framebuffer)
 	{
+		// Подготовка командного буфера
 		vkResetCommandBuffer(cmd, 0);
 		VkCommandBufferBeginInfo beginInfo{
 			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-			.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+			.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, // Буфер будет использоваться только один раз за кадр
 		};
 		vkBeginCommandBuffer(cmd, &beginInfo);
 
+		// Начало Render Pass
+		// Render Pass определяет, куда будет идти результат рендеринга (в какой framebuffer)
+		// и как очищать экран перед отрисовкой.
 		VkClearValue clear_values[2];
-		clear_values[0].color = {{0.1f, 0.1f, 0.1f, 1.0f}};
-		clear_values[1].depthStencil = {1.0f, 0};
+		clear_values[0].color = {{0.1f, 0.1f, 0.1f, 1.0f}}; // Цвет фона (темно-серый)
+		clear_values[1].depthStencil = {1.0f, 0};			// Значение для очистки буфера глубины
 		VkRenderPassBeginInfo renderPassInfo{
 			.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
 			.renderPass = veekay::app.vk_render_pass,
@@ -425,13 +520,20 @@ namespace
 			.pClearValues = clear_values,
 		};
 		vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+		// Отрисовка объектов
+		// Привязываем наш графический конвейер
 		vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
+		// Лямбда-функция для удобной отрисовки одного объекта
 		auto draw_object = [&](const SceneObject &obj)
 		{
+			// Привязываем вершинный и индексный буферы объекта
 			VkDeviceSize offset = 0;
 			vkCmdBindVertexBuffers(cmd, 0, 1, &obj.vertex_buffer.buffer, &offset);
 			vkCmdBindIndexBuffer(cmd, obj.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+			// Готовим данные (матрицы, цвет) для передачи в шейдер
 			ShaderConstants constants{
 				.projection = projection(
 					camera_fov,
@@ -440,21 +542,27 @@ namespace
 				.transform = multiply(rotation({0.0f, 1.0f, 0.0f}, obj.rotation), translation(obj.position)),
 				.color = obj.color,
 			};
+
+			// Передаем данные в шейдер через Push Constants
 			vkCmdPushConstants(cmd, pipeline_layout,
 							   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
 							   0, sizeof(ShaderConstants), &constants);
+
+			// Даем команду на отрисовку
 			vkCmdDrawIndexed(cmd, obj.index_count, 1, 0, 0, 0);
 		};
 
+		// Рисуем все наши объекты
 		draw_object(cube);
 		draw_object(pyramid);
 		draw_object(sphere);
 
+		// Завершение Render Pass и командного буфера
 		vkCmdEndRenderPass(cmd);
 		vkEndCommandBuffer(cmd);
 	}
 
-} // namespace
+}
 
 int main()
 {
